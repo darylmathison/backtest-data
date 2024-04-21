@@ -1,0 +1,21 @@
+name: Unit tests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/*'
+  push:
+    branches:
+      - 'feature/*'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@main
+    - name: Build the Docker image
+      run: docker build . --file Dockerfile_test --tag bot-utest
+    - name: Run the tests
+      run: docker run -t bot-utest pytest test
