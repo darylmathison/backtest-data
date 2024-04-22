@@ -12,7 +12,7 @@ class Base(DeclarativeBase):
 
 class Stock(Base):
     __tablename__ = "stocks"
-    id: Mapped[int] = mapped_column(String, primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String)
     open: Mapped[float] = mapped_column(REAL)
     high: Mapped[float] = mapped_column(REAL)
@@ -26,7 +26,7 @@ class Stock(Base):
 
 class Dividends(Base):
     __tablename__ = "dividends"
-    id: Mapped[int] = mapped_column(String, primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String)
     ex_dividend_date: Mapped[datetime.date] = mapped_column(Date)
     pay_date: Mapped[datetime.date] = mapped_column(Date)
@@ -39,7 +39,7 @@ class Dividends(Base):
 
 class Correlation(Base):
     __tablename__ = "correlations"
-    id: Mapped[int] = mapped_column(String, primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     right: Mapped[str] = mapped_column(String)
     left: Mapped[str] = mapped_column(String)
     correlation: Mapped[float] = mapped_column(REAL)
@@ -47,6 +47,6 @@ class Correlation(Base):
 
 class Assets(Base):
     __tablename__ = "assets"
-    id: Mapped[int] = mapped_column(String, primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String)
     downloaded: Mapped[bool] = mapped_column(Boolean)
