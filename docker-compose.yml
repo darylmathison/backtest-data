@@ -1,0 +1,12 @@
+services:
+  database:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_DB: stock_data
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - ${HOME}/Documents/data/pgdata:/var/lib/postgresql/data/pgdata
