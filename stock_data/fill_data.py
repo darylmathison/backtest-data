@@ -1,5 +1,7 @@
 from datetime import datetime
 import os
+
+import dateutil.parser
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import (
     StockBarsRequest,
@@ -9,9 +11,11 @@ from alpaca.trading import TradingClient, GetAssetsRequest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from stock import Stock, Base
+from stock import Stock, Base, Dividends
 
 import contextlib
+
+from stock_data.dividend_annoucements import get_dividend_announcements
 
 alpaca_creds = {
     "api_key": os.getenv("ALPACA_API_KEY"),
@@ -64,8 +68,33 @@ def fill_stock_data(session, symbol, start, end, timeframe=TimeFrame.Day):
         populate_stock_data(session, symbol, start, end, timeframe)
 
 
-def fill_dividend_data(session, symbol, start, end):
-    pass
+def fill_dividend_data(session, start, end):
+    announcements = (
+        a
+        for a in get_dividend_announcements(start)
+        if dateutil.parser.parse(a["ex_dividend_date"]).date() <= end.date()
+    )
+    for announcement in announcements:
+        if "declaration_date" not in announcement:
+            declaration_date = announcement["ex_dividend_date"]
+        else:
+            declaration_date = announcement["declaration_date"]
+
+        if "pay_date" not in announcement:
+            announcement["pay_date"] = announcement["ex_dividend_date"]
+
+        dividend = Dividends(
+            symbol=announcement["ticker"],
+            ex_dividend_date=announcement["ex_dividend_date"],
+            pay_date=announcement["pay_date"],
+            record_date=announcement["record_date"],
+            declared_date=declaration_date,
+            cash_amount=announcement["cash_amount"],
+            currency=announcement["currency"],
+            frequency=announcement["frequency"] or "unknown",
+        )
+        session.add(dividend)
+        session.commit()
 
 
 if __name__ == "__main__":
@@ -78,3 +107,4 @@ if __name__ == "__main__":
         start = datetime(2021 - 5, 1, 1)
         end = datetime(2021, 5, 3)
         fill_stock_data(session, symbols, start, end)
+        fill_dividend_data(session, start, end)
