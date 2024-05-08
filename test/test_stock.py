@@ -8,8 +8,8 @@ import pytz
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-import stock_data.stock
-from stock_data.stock import Base, Stock, Dividends
+import stock_data.models
+from stock_data.models import Base, Stock, Dividends
 
 DATABASE_URL = "sqlite:///:memory:"
 

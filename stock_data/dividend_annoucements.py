@@ -35,12 +35,11 @@ def get_dividend_announcements(the_day: datetime.datetime):
                     f"size: {size}, ex_dividend_date: {r['results'][-1]['ex_dividend_date']}"
                 )
                 for asset in r["results"]:
-                    if asset["currency"] == "USD":
-                        yield asset
+                    yield asset
         except requests.exceptions.HTTPError as err:
             logging.info(err)
             time.sleep(30)
             repeat = True
         except Exception as e:
-            logging.error(e)
+            logging.error(repr(e))
             repeat = False
