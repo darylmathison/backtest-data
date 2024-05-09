@@ -2,16 +2,20 @@ from datetime import datetime
 import os
 
 import dateutil.parser
+import requests
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import (
     StockBarsRequest,
 )
+from business_calendar import Calendar, MO, TU, WE, TH, FR
 from alpaca.data.timeframe import TimeFrame
-from alpaca.trading import TradingClient, GetAssetsRequest
+from alpaca.trading import TradingClient, GetAssetsRequest, GetCalendarRequest
+from retry_reloaded import retry
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from urllib3.exceptions import ReadTimeoutError
 
-from stock import Stock, Base, Dividends
+from stock_data.models import Stock, Base, Dividends, Holidays
 
 import contextlib
 
@@ -25,20 +29,37 @@ alpaca_creds = {
 
 @contextlib.contextmanager
 def open_session():
+    dbsession = None
     try:
         password = os.getenv("DB_PASSWORD")
         db_url = f"postgresql://postgres:{password}@localhost:5432/stock_data"
-        engine = create_engine(db_url, echo=True)
+        engine = create_engine(db_url)
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine, expire_on_commit=False)
-        session = Session()
-        yield session
+        dbsession = Session()
+        yield dbsession
     finally:
-        session.close()
+        if dbsession:
+            dbsession.close()
 
 
-def fill_stock_data(session, symbol, start, end, timeframe=TimeFrame.Day):
-    def populate_stock_data(session, symbol, start, end, timeframe):
+def find_existing_stocks(dbsession):
+    return {stocks[0] for stocks in dbsession.query(Stock.symbol).distinct().all()}
+
+
+def find_latest_ex_dividend_date(dbsession):
+    ret = (
+        dbsession.query(Dividends.ex_dividend_date)
+        .order_by(Dividends.ex_dividend_date.desc())
+        .first()
+    )
+    if ret is None:
+        return datetime(1970, 1, 1).date()
+    return ret[0]
+
+
+def fill_stock_data(dbsession, symbol, start, end, timeframe=TimeFrame.Day):
+    def populate_stock_data(symbol, start, end, timeframe):
         bars_request = StockBarsRequest(
             symbol_or_symbols=symbol, start=start, end=end, timeframe=timeframe
         )
@@ -55,26 +76,27 @@ def fill_stock_data(session, symbol, start, end, timeframe=TimeFrame.Day):
                 trade_count=bar.trade_count,
                 dividend=False,
             )
-            session.add(stock)
-            session.commit()
+            dbsession.add(stock)
+            dbsession.commit()
 
     client = StockHistoricalDataClient(
         **alpaca_creds
     )  # make sure the API key is set in the environment
     if isinstance(symbol, (list, tuple, set)):
         for s in symbol:
-            populate_stock_data(session, s, start, end, timeframe)
+            populate_stock_data(s, start, end, timeframe)
     else:
-        populate_stock_data(session, symbol, start, end, timeframe)
+        populate_stock_data(symbol, start, end, timeframe)
 
 
-def fill_dividend_data(session, start, end):
-    announcements = (
-        a
-        for a in get_dividend_announcements(start)
-        if dateutil.parser.parse(a["ex_dividend_date"]).date() <= end.date()
-    )
-    for announcement in announcements:
+@retry((ReadTimeoutError,))
+def fill_dividend_data(dbsession, start, end):
+    latest_date = find_latest_ex_dividend_date(dbsession)
+    query_date = max(latest_date, start.date())
+    for announcement in get_dividend_announcements(query_date):
+        if dateutil.parser.parse(announcement["ex_dividend_date"]).date() > end.date():
+            break
+
         if "declaration_date" not in announcement:
             declaration_date = announcement["ex_dividend_date"]
         else:
@@ -82,6 +104,9 @@ def fill_dividend_data(session, start, end):
 
         if "pay_date" not in announcement:
             announcement["pay_date"] = announcement["ex_dividend_date"]
+
+        if "currency" not in announcement:
+            announcement["currency"] = "USD"
 
         dividend = Dividends(
             symbol=announcement["ticker"],
@@ -93,18 +118,43 @@ def fill_dividend_data(session, start, end):
             currency=announcement["currency"],
             frequency=announcement["frequency"] or "unknown",
         )
-        session.add(dividend)
-        session.commit()
+        dbsession.add(dividend)
+        dbsession.commit()
 
 
-if __name__ == "__main__":
-    with open_session() as session:
+@retry((requests.exceptions.ConnectionError,))
+def initial_fill_stocks(start, end):
+    with open_session() as dbsession:
         alpaca_client = TradingClient(**alpaca_creds, paper=False)
         request = GetAssetsRequest(asset_status="active", asset_class="us_equity")
         assets = alpaca_client.get_all_assets(request)
         symbols = {asset.symbol for asset in assets if asset.tradable}
+        current_symbols = find_existing_stocks(dbsession)
+        symbols = symbols - current_symbols
 
-        start = datetime(2021 - 5, 1, 1)
-        end = datetime(2021, 5, 3)
-        fill_stock_data(session, symbols, start, end)
-        fill_dividend_data(session, start, end)
+        fill_stock_data(dbsession, symbols, start, end)
+
+
+def fill_holidays(start, end):
+    alpaca_client = TradingClient(**alpaca_creds, paper=False)
+    calendar = Calendar(workdays=[MO, TU, WE, TH, FR])
+    with open_session() as dbsession:
+        calendar_request = GetCalendarRequest(start=start, end=end)
+        market_days = {d.date for d in alpaca_client.get_calendar(calendar_request)}
+        all_days = {d.date() for d in calendar.range(start, end)}
+        holidays = all_days.difference(market_days)
+        for holiday in holidays:
+            dbsession.add(Holidays(date=holiday))
+        dbsession.commit()
+
+
+if __name__ == "__main__":
+    end = datetime.now()
+    end = datetime(end.year, end.month, end.day)
+    years_back = 5
+    start = datetime(end.year - years_back, 1, 1)
+    initial_fill_stocks(start, end)
+
+    with open_session() as dbsession:
+        fill_dividend_data(dbsession, start, end)
+    fill_holidays(start, end)
