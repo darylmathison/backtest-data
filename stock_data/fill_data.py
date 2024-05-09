@@ -7,14 +7,15 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import (
     StockBarsRequest,
 )
+from business_calendar import Calendar, MO, TU, WE, TH, FR
 from alpaca.data.timeframe import TimeFrame
-from alpaca.trading import TradingClient, GetAssetsRequest
+from alpaca.trading import TradingClient, GetAssetsRequest, GetCalendarRequest
 from retry_reloaded import retry
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from urllib3.exceptions import ReadTimeoutError
 
-from stock_data.models import Stock, Base, Dividends
+from stock_data.models import Stock, Base, Dividends, Holidays
 
 import contextlib
 
@@ -28,6 +29,7 @@ alpaca_creds = {
 
 @contextlib.contextmanager
 def open_session():
+    dbsession = None
     try:
         password = os.getenv("DB_PASSWORD")
         db_url = f"postgresql://postgres:{password}@localhost:5432/stock_data"
@@ -37,7 +39,8 @@ def open_session():
         dbsession = Session()
         yield dbsession
     finally:
-        dbsession.close()
+        if dbsession:
+            dbsession.close()
 
 
 def find_existing_stocks(dbsession):
@@ -132,11 +135,26 @@ def initial_fill_stocks(start, end):
         fill_stock_data(dbsession, symbols, start, end)
 
 
+def fill_holidays(start, end):
+    alpaca_client = TradingClient(**alpaca_creds, paper=False)
+    calendar = Calendar(workdays=[MO, TU, WE, TH, FR])
+    with open_session() as dbsession:
+        calendar_request = GetCalendarRequest(start=start, end=end)
+        market_days = {d.date for d in alpaca_client.get_calendar(calendar_request)}
+        all_days = {d.date() for d in calendar.range(start, end)}
+        holidays = all_days.difference(market_days)
+        for holiday in holidays:
+            dbsession.add(Holidays(date=holiday))
+        dbsession.commit()
+
+
 if __name__ == "__main__":
     end = datetime.now()
+    end = datetime(end.year, end.month, end.day)
     years_back = 5
     start = datetime(end.year - years_back, 1, 1)
     initial_fill_stocks(start, end)
 
     with open_session() as dbsession:
         fill_dividend_data(dbsession, start, end)
+    fill_holidays(start, end)

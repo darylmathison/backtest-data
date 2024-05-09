@@ -66,3 +66,10 @@ class Assets(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String)
     downloaded: Mapped[bool] = mapped_column(Boolean)
+
+
+class Holidays(Base):
+    __tablename__ = "holidays"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    date: Mapped[datetime.date] = mapped_column(Date)
+    __table_args__ = (UniqueConstraint("date", name="uix_date"),)
