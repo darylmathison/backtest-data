@@ -136,12 +136,13 @@ def initial_fill_stocks(start, end):
 
 
 def fill_holidays(start, end):
+    request_start = datetime(start.year - 1, 1, 1)
     alpaca_client = TradingClient(**alpaca_creds, paper=False)
     calendar = Calendar(workdays=[MO, TU, WE, TH, FR])
     with open_session() as dbsession:
-        calendar_request = GetCalendarRequest(start=start, end=end)
+        calendar_request = GetCalendarRequest(start=request_start.date(), end=end)
         market_days = {d.date for d in alpaca_client.get_calendar(calendar_request)}
-        all_days = {d.date() for d in calendar.range(start, end)}
+        all_days = {d.date() for d in calendar.range(request_start, end)}
         holidays = all_days.difference(market_days)
         for holiday in holidays:
             dbsession.add(Holidays(date=holiday))
