@@ -1,10 +1,10 @@
-from stock_data import create_calendar
+import stock_data as sd
 from stock_data.models import Dividends, Stock
-from stock_data.fill_data import open_session
+import stock_data.fill_data as fd
 import pandas as pd
 import scipy.stats
 
-# risk = prob of win/amount of loss - prob of loss/amount of gain
+# what to risk = prob of win/amount of loss - prob of loss/amount of gain
 
 
 def dividend_stocks(dbsession):
@@ -43,11 +43,21 @@ def collective_win(dbsession, symbols, buy_days=5):
     rows = []
 
     for symbol in symbols:
-        _win_rate, loss_rate, avg_gain, avg_loss, sample_size = win_rate(
+        _win_rate, loss_rate, avg_gain, avg_loss, sample_size, avg_dividend = win_rate(
             dbsession, symbol, buy_days
         )
         if _win_rate is not None and (avg_loss > 0 and avg_gain > 0):
-            rows.append([symbol, _win_rate, loss_rate, avg_gain, avg_loss, sample_size])
+            rows.append(
+                [
+                    symbol,
+                    _win_rate,
+                    loss_rate,
+                    avg_gain,
+                    avg_loss,
+                    sample_size,
+                    avg_dividend,
+                ]
+            )
 
     return pd.DataFrame(
         rows,
@@ -58,6 +68,7 @@ def collective_win(dbsession, symbols, buy_days=5):
             "avg_gain",
             "avg_loss",
             "sample_size",
+            "avg_dividend",
         ],
     )
 
@@ -73,8 +84,8 @@ def win_rate(dbsession, symbol, buy_days=5):
         index_col="ex_dividend_date",
     )
     if len(divs) < 2:
-        return None, None, None, None, None
-    calendar = create_calendar()
+        return [None] * 6
+    calendar = sd.create_calendar()
     divs["sell_date"] = divs.index.map(lambda x: calendar.addbusdays(x, -1))
     divs["sell_price"] = divs["sell_date"].map(
         lambda x: sell_price(dbsession, symbol, x)
@@ -83,7 +94,8 @@ def win_rate(dbsession, symbol, buy_days=5):
     divs["purchase_price"] = divs["purchase_date"].map(
         lambda x: purchase_price(dbsession, symbol, x)
     )
-    divs["gain"] = divs["sell_price"] - divs["purchase_price"] + divs["cash_amount"]
+    # divs["gain"] = divs["sell_price"] - divs["purchase_price"] + divs["cash_amount"]
+    divs["gain"] = divs["sell_price"] - divs["purchase_price"]
     divs["percent_gain"] = divs["gain"] / divs["purchase_price"]
     divs["win"] = divs["gain"] > 0
     if len(divs) == 0:
@@ -103,16 +115,24 @@ def win_rate(dbsession, symbol, buy_days=5):
         )
     else:
         avg_loss = 0
-    return _win_rate, loss_rate, avg_gain, avg_loss, len(divs)
+    return (
+        _win_rate,
+        loss_rate,
+        avg_gain,
+        avg_loss,
+        len(divs),
+        divs["cash_amount"].mean(),
+    )
 
 
 if __name__ == "__main__":
-    with open_session() as session:
+    with fd.open_session() as session:
         symbols = dividend_stocks(session)
         df = collective_win(session, symbols, 5)
         df["risk"] = (df["win_rate"] / df["avg_loss"]) - (
             df["loss_rate"] / df["avg_gain"]
         )
+        print(df[df["symbol"] == "MO"])
         print(
             df[
                 [
