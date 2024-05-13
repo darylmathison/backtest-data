@@ -3,7 +3,7 @@ _calender = None
 
 def create_calendar():
     from business_calendar import Calendar, MO, TU, WE, TH, FR
-    from fill_data import open_session
+    from stock_data.fill_data import open_session
     from stock_data.models import Holidays
 
     global _calender
