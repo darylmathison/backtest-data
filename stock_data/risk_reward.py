@@ -17,23 +17,23 @@ def dividend_stocks(dbsession):
     }
 
 
-def purchase_price(dbsession, symbol, date):
-    stock = (
+def get_stock(dbsession, symbol, date):
+    return (
         dbsession.query(Stock)
         .filter(Stock.symbol == symbol, Stock.date == date)
         .first()
     )
+
+
+def purchase_price(dbsession, symbol, date):
+    stock = get_stock(dbsession, symbol, date)
     if stock is None:
         return None
     return stock.open
 
 
 def sell_price(dbsession, symbol, date):
-    stock = (
-        dbsession.query(Stock)
-        .filter(Stock.symbol == symbol, Stock.date == date)
-        .first()
-    )
+    stock = get_stock(dbsession, symbol, date)
     if stock is None:
         return None
     return stock.close
@@ -51,8 +51,8 @@ def collective_win(dbsession, symbols, buy_days=5):
                 [
                     symbol,
                     _win_rate,
-                    loss_rate,
                     avg_gain,
+                    loss_rate,
                     avg_loss,
                     sample_size,
                     avg_dividend,
@@ -64,8 +64,8 @@ def collective_win(dbsession, symbols, buy_days=5):
         columns=[
             "symbol",
             "win_rate",
-            "loss_rate",
             "avg_gain",
+            "loss_rate",
             "avg_loss",
             "sample_size",
             "avg_dividend",
@@ -94,7 +94,6 @@ def win_rate(dbsession, symbol, buy_days=5):
     divs["purchase_price"] = divs["purchase_date"].map(
         lambda x: purchase_price(dbsession, symbol, x)
     )
-    # divs["gain"] = divs["sell_price"] - divs["purchase_price"] + divs["cash_amount"]
     divs["gain"] = divs["sell_price"] - divs["purchase_price"]
     divs["percent_gain"] = divs["gain"] / divs["purchase_price"]
     divs["win"] = divs["gain"] > 0
@@ -104,14 +103,16 @@ def win_rate(dbsession, symbol, buy_days=5):
         _win_rate = divs["win"].sum() / len(divs)
     loss_rate = 1 - _win_rate
     if _win_rate > 0:
-        avg_gain = scipy.stats.gmean(
-            divs["percent_gain"].where(divs["gain"] > 0).dropna()
-        )
+        avg_gain = divs["percent_gain"].where(divs["gain"] > 0).dropna().mean()
     else:
         avg_gain = 0
     if loss_rate > 0:
-        avg_loss = scipy.stats.gmean(
-            divs["percent_gain"].where(divs["gain"] < 0).dropna().map(lambda x: abs(x))
+        avg_loss = (
+            divs["percent_gain"]
+            .where(divs["gain"] < 0)
+            .dropna()
+            .map(lambda x: abs(x))
+            .mean()
         )
     else:
         avg_loss = 0
