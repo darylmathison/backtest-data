@@ -131,7 +131,7 @@ class TestDividends(unittest.TestCase):
                 "frequency": "CD",
                 "declared_date": convert_to_date(row["ex_dividend_date"]),
             }
-            dividend = stock_data.stock.Dividends(**dividend_data_row)
+            dividend = stock_data.models.Dividends(**dividend_data_row)
             self.session.add(dividend)
 
     def tearDown(self):
