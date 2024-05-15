@@ -4,6 +4,8 @@ from sqlalchemy import String, REAL, Date, Boolean, UniqueConstraint, Index
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
+from sqlalchemy import Table, Column, Integer, ForeignKey
+from sqlalchemy.orm import relationship
 
 
 class Base(DeclarativeBase):
@@ -61,15 +63,53 @@ class Correlation(Base):
     correlation: Mapped[float] = mapped_column(REAL)
 
 
+assets_marketdays_link = Table(
+    "assets_marketdays",
+    Base.metadata,
+    Column("assets_id", Integer, ForeignKey("assets.id")),
+    Column("marketdays_id", Integer, ForeignKey("market_days.id")),
+)
+
+
 class Assets(Base):
     __tablename__ = "assets"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String)
     downloaded: Mapped[bool] = mapped_column(Boolean)
 
+    market_days = relationship(
+        "MarketDays", secondary=assets_marketdays_link, back_populates="assets"
+    )
+
+
+class MarketDays(Base):
+    __tablename__ = "market_days"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    date: Mapped[datetime.date] = mapped_column(Date)
+    __table_args__ = (UniqueConstraint("date", name="uix_marketdays_date"),)
+
+    assets = relationship(
+        "Assets", secondary=assets_marketdays_link, back_populates="market_days"
+    )
+
 
 class Holidays(Base):
     __tablename__ = "holidays"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     date: Mapped[datetime.date] = mapped_column(Date)
-    __table_args__ = (UniqueConstraint("date", name="uix_date"),)
+    __table_args__ = (UniqueConstraint("date", name="uix_holidays_date"),)
+
+
+class RiskReward(Base):
+    __tablename__ = "risk_reward"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String)
+    win_rate: Mapped[float] = mapped_column(REAL)
+    loss_rate: Mapped[float] = mapped_column(REAL)
+    avg_gain: Mapped[float] = mapped_column(REAL)
+    avg_loss: Mapped[float] = mapped_column(REAL)
+    sample_size: Mapped[int] = mapped_column(Integer)
+    avg_dividend: Mapped[float] = mapped_column(REAL)
+    last_update: Mapped[datetime.date] = mapped_column(Date)
+    portion_to_risk: Mapped[float] = mapped_column(REAL, nullable=True)
+    __table_args__ = (UniqueConstraint("symbol", name="uix_risk_reward_symbol"),)

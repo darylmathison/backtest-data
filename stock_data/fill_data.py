@@ -4,11 +4,7 @@ import os
 
 import dateutil.parser
 import requests
-import yfinance
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import (
-    StockBarsRequest,
-)
+
 from business_calendar import Calendar, MO, TU, WE, TH, FR
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading import TradingClient, GetAssetsRequest, GetCalendarRequest
@@ -17,8 +13,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from urllib3.exceptions import ReadTimeoutError
 
-from stock_data.models import Stock, Base, Dividends, Holidays
-
+from stock_data.models import Stock, Base, Dividends, Holidays, MarketDays, Assets
+from stock_data.stock_downloads import download_stock_data
 import contextlib
 
 from stock_data.dividend_annoucements import get_dividend_announcements
@@ -66,7 +62,7 @@ def does_this_announcement_exist(dbsession, date, symbol):
     )
 
 
-def does_this_bar_exist(dbsession, date, symbol):
+def does_this_bar_exist(dbsession, date: datetime.date, symbol: str):
     return (
         dbsession.query(Stock)
         .filter(Stock.symbol == symbol, Stock.date == date)
@@ -74,71 +70,42 @@ def does_this_bar_exist(dbsession, date, symbol):
     )
 
 
-def pull_from_alpaca(symbol, start, end, timeframe):
-    client = StockHistoricalDataClient(
-        **alpaca_creds
-    )  # make sure the API key is set in the environment
-    bars_request = StockBarsRequest(
-        symbol_or_symbols=symbol, start=start, end=end, timeframe=timeframe
-    )
-    bars = client.get_stock_bars(bars_request)
-    if not bars[symbol]:
-        return None
-    return [
-        Stock(
-            symbol=symbol,
-            date=bar.timestamp,
-            open=bar.open,
-            high=bar.high,
-            low=bar.low,
-            close=bar.close,
-            volume=bar.volume,
-            trade_count=bar.trade_count,
-            dividend=False,
+def has_this_bar_been_downloaded(dbsession, symbol: str, date: datetime.date):
+    asset = (
+        dbsession.query(Assets)
+        .filter(
+            Assets.symbol == symbol, Assets.market_days.any(MarketDays.date == date)
         )
-        for bar in bars[symbol]
-    ]
-
-
-def pull_from_yahoo(symbol, start, end, timeframe):
-    yahoo_timeframes = {
-        str(TimeFrame.Day): "1d",
-        str(TimeFrame.Minute): "1m",
-        str(TimeFrame.Hour): "1h",
-    }
-    data = yfinance.download(
-        symbol, start=start, end=end, interval=yahoo_timeframes[str(timeframe)]
+        .first()
     )
-    return [
-        Stock(
-            symbol=symbol,
-            date=date,
-            open=float(data.loc[date, "Open"]),
-            high=float(data.loc[date, "High"]),
-            low=float(data.loc[date, "Low"]),
-            close=float(data.loc[date, "Close"]),
-            volume=float(data.loc[date, "Volume"]),
-            trade_count=0,
-            dividend=False,
-        )
-        for date in data.index
-    ]
+    if asset:
+        return True
+    return False
 
 
-def download_stock_data(symbol, start, end, timeframe):
-    stock_data = pull_from_alpaca(symbol, start, end, timeframe)
-    if stock_data is None:
-        stock_data = pull_from_yahoo(symbol, start, end, timeframe)
-    return stock_data
+def mark_stock_as_downloaded(dbsession, symbol, date):
+    asset = dbsession.query(Assets).filter(Assets.symbol == symbol).first()
+    market_day = dbsession.query(MarketDays).filter(MarketDays.date == date).first()
+    if asset is None:
+        new_asset = Assets(symbol=symbol, downloaded=True)
+        new_asset.market_days.append(market_day)
+        dbsession.add(new_asset)
+    else:
+        asset.downloaded = True
+        asset.market_days.append(market_day)
+        dbsession.add(asset)
+    dbsession.commit()
 
 
 def fill_stock_data(dbsession, symbol, start, end, timeframe=TimeFrame.Day):
     def populate_stock_data(symbol, start, end, timeframe):
         stock_data = download_stock_data(symbol, start, end, timeframe)
-        for stock in stock_data:
-            if not does_this_bar_exist(dbsession, stock.date, stock.symbol):
-                dbsession.add(stock)
-                dbsession.commit()
+        if stock_data:
+            for stock in stock_data:
+                if not does_this_bar_exist(dbsession, stock.date, stock.symbol):
+                    dbsession.add(stock)
+                    dbsession.commit()
+                mark_stock_as_downloaded(dbsession, stock.symbol, stock.date.date())
 
     if isinstance(symbol, (list, tuple, set)):
         for s in symbol:
@@ -216,13 +183,32 @@ def fill_holidays(start, end):
         dbsession.commit()
 
 
+def fill_market_days(start, end):
+    request_start = datetime(start.year - 1, 1, 1)
+    alpaca_client = TradingClient(**alpaca_creds, paper=False)
+    with open_session() as dbsession:
+        existing_market_days = {
+            d[0]
+            for d in dbsession.query(MarketDays.date)
+            .filter(MarketDays.date.between(request_start.date(), end))
+            .all()
+        }
+        calendar_request = GetCalendarRequest(start=request_start.date(), end=end)
+        market_days = {d.date for d in alpaca_client.get_calendar(calendar_request)}
+        for day in market_days:
+            if day not in existing_market_days:
+                dbsession.add(MarketDays(date=day))
+        dbsession.commit()
+
+
 if __name__ == "__main__":
     end = datetime.now()
     end = datetime(end.year, end.month, end.day)
     years_back = 10
     start = datetime(end.year - years_back, 1, 1)
-    initial_fill_stocks(start, end)
 
+    fill_market_days(start, end)
+    fill_holidays(start, end)
+    initial_fill_stocks(start, end)
     with open_session() as dbsession:
         fill_dividend_data(dbsession, start, end)
-    fill_holidays(start, end)
