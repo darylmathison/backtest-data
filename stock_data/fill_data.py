@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 import os
 from typing import Type
@@ -124,21 +125,63 @@ def months_from_date_to_now(date):
     return r.years * 12 + r.months
 
 
+def fill_dividend_data_with_existing_data(
+    dbsession, asset: Type[Assets], start: datetime.date, end: datetime.date
+):
+    dividends = (
+        dbsession.query(Dividends).filter(Dividends.symbol == asset.symbol).all()
+    )
+    if len(dividends) > 0:
+        frequency_canidates = set(
+            map(
+                lambda x: float(x),
+                filter(
+                    lambda x: re.search(r"\d+", x), (d.frequency for d in dividends)
+                ),
+            )
+        )
+        if frequency_canidates:
+            frequency = max(frequency_canidates)
+        else:
+            frequency = -1
+
+        asset.dividend = True
+        number_of_months = months_from_date_to_now(asset.start_date)
+        if frequency == -1:
+            asset.min_num_events = -1
+            asset.percentage_downloaded = 0.0
+        else:
+            asset.min_num_events = calulate_num_event(number_of_months, frequency)
+            asset.percentage_downloaded = float(len(dividends) / asset.min_num_events)
+        asset.dividend_checked = True
+        dbsession.add(asset)
+        return asset
+    return None
+
+
+def calulate_num_event(number_of_months, frequency):
+    return int(number_of_months / (12.0 / frequency))
+
+
 @retry((ReadTimeoutError,))
 def fill_dividend_data(dbsession, start, end, assets: list[Type[Assets]]):
     for asset in assets:
         logging.info("Downloading %s", asset.symbol)
+        if fill_dividend_data_with_existing_data(dbsession, asset, start, end):
+            dbsession.commit()
+            continue
         asset_dividend_init = False
         for announcement in get_dividend_announcements(asset.symbol, start):
             if not asset.dividend and not asset_dividend_init:
-                if "frequency" in announcement and (
-                    announcement["frequency"] is not None
-                    or announcement["frequency"] != 0
+                if (
+                    "frequency" in announcement
+                    and announcement["frequency"] is not None
+                    and announcement["frequency"] != 0
                 ):
                     asset.dividend = True
                     number_of_months = months_from_date_to_now(asset.start_date)
-                    asset.min_num_events = int(
-                        number_of_months / (float(announcement["frequency"]) / 12.0)
+                    asset.min_num_events = calulate_num_event(
+                        number_of_months, float(announcement["frequency"])
                     )
                     logging.info(
                         "Expecting to download %s events from %s months and %s frequency",
@@ -198,17 +241,19 @@ def fill_dividend_data(dbsession, start, end, assets: list[Type[Assets]]):
 
 def find_start_date(asset: Assets, start: datetime.date):
     try:
+        ticker_info = polygon_client.ticker_info(asset.symbol)
+        date_key = "list_date"
+        if date_key in ticker_info:
+            return max(dateutil.parser.parse(ticker_info[date_key]).date(), start)
+        else:
+            yahoo_asset = yf.Ticker(asset.symbol).history(period="max")
+            if not yahoo_asset.empty:
+                return max(yahoo_asset.index[0].date(), start)
+    except Exception as e:
+        logging.error("Error finding start date for %s: %s", asset.symbol, e)
         yahoo_asset = yf.Ticker(asset.symbol).history(period="max")
         if not yahoo_asset.empty:
             return max(yahoo_asset.index[0].date(), start)
-        else:
-            ticker_info = polygon_client.ticker_info(asset.symbol)
-            if "listdate" in ticker_info:
-                return max(dateutil.parser.parse(ticker_info["listdate"]).date(), start)
-            else:
-                return start
-    except Exception as e:
-        logging.error("Error finding start date for %s: %s", asset.symbol, e)
     finally:
         return start
 

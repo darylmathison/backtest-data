@@ -19,7 +19,7 @@ def get_dividend_announcements(symbol: str, the_day: datetime.datetime):
     uri = uri_template.format(apikey=api_key, date=date, symbol=symbol)
     while repeat:
         try:
-            r = requests.get(uri)
+            r = requests.get(uri, timeout=(3, 10))
             r.raise_for_status()
             r = r.json()
             if "next_url" in r:
@@ -53,16 +53,12 @@ def get_dividend_announcements(symbol: str, the_day: datetime.datetime):
 
 def ticker_info(symbol):
     uri_template = (
-        "https://api.polygon.io/v1/meta/symbols/{symbol}/company?apiKey={apikey}"
+        "https://api.polygon.io/v3/reference/tickers/{symbol}?apiKey={apikey}"
     )
     uri = uri_template.format(symbol=symbol, apikey=api_key)
-    try:
-        r = requests.get(uri)
-        r.raise_for_status()
-        return r.json()
-    except requests.exceptions.HTTPError as err:
-        logging.info(err)
-        time.sleep(30)
-        r = requests.get(uri)
-        r.raise_for_status()
-        return r.json()
+    r = requests.get(uri, timeout=(3, 10))
+    r.raise_for_status()
+    json = r.json()
+    if "results" in json:
+        return json["results"]
+    return json
