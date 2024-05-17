@@ -75,11 +75,17 @@ class Assets(Base):
     __tablename__ = "assets"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String)
-    downloaded: Mapped[bool] = mapped_column(Boolean)
+    start_date: Mapped[datetime.date] = mapped_column(Date)
+    min_num_events: Mapped[int] = mapped_column(Integer, default=0)
+    percentage_downloaded: Mapped[float] = mapped_column(REAL, default=0.0)
+    dividend: Mapped[bool] = mapped_column(Boolean, default=False)
+    dividend_checked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     market_days = relationship(
         "MarketDays", secondary=assets_marketdays_link, back_populates="assets"
     )
+
+    __table_args__ = (UniqueConstraint("symbol", name="uix_assets_symbol"),)
 
 
 class MarketDays(Base):

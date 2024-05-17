@@ -121,7 +121,9 @@ def process_all_securities(dbsession, symbols, buy_days=5):
             )
             dbsession.add(risk_reward_row)
             dbsession.commit()
-    return pd.read_sql(dbsession.query(RiskReward).statement, dbsession.bind)
+    return pd.read_sql(
+        dbsession.query(RiskReward).statement, dbsession.bind, index_col="symbol"
+    )
 
 
 def win_rate(dbsession, symbol, buy_days=5):
