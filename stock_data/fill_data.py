@@ -107,9 +107,12 @@ def fill_stock_data(dbsession, symbol, start, end, timeframe=TimeFrame.Day):
         stock_data = download_stock_data(symbol, start, end, timeframe)
         if stock_data:
             for stock in stock_data:
-                if not does_this_bar_exist(dbsession, stock.date, stock.symbol):
-                    dbsession.add(stock)
-                    dbsession.commit()
+                try:
+                    if not does_this_bar_exist(dbsession, stock.date, stock.symbol):
+                        dbsession.add(stock)
+                        dbsession.commit()
+                except UniqueViolation as uv:
+                    logging.warning("Duplicate entry: %s", uv)
                 mark_stock_as_downloaded(dbsession, stock.symbol, stock.date.date())
 
     if isinstance(symbol, (list, tuple, set)):
@@ -290,7 +293,7 @@ def initial_fill_stocks(start, end):
 
 
 def fill_holidays(start, end):
-    request_start = datetime(start.year - 1, 1, 1)
+    request_start = datetime(start.year - 1, 1, 1).date()
     alpaca_client = TradingClient(**alpaca_creds, paper=False)
     calendar = Calendar(workdays=[MO, TU, WE, TH, FR])
     with open_session() as dbsession:
@@ -300,9 +303,9 @@ def fill_holidays(start, end):
             .filter(Holidays.date.between(request_start, end))
             .all()
         }
-        calendar_request = GetCalendarRequest(start=request_start.date(), end=end)
+        calendar_request = GetCalendarRequest(start=request_start, end=end)
         market_days = {d.date for d in alpaca_client.get_calendar(calendar_request)}
-        all_days = {d.date() for d in calendar.range(request_start, end)}
+        all_days = {d for d in calendar.range(request_start, end)}
         holidays = all_days.difference(market_days) - previous_holidays
         for holiday in holidays:
             dbsession.add(Holidays(date=holiday))
@@ -310,16 +313,16 @@ def fill_holidays(start, end):
 
 
 def fill_market_days(start, end):
-    request_start = datetime(start.year - 1, 1, 1)
+    request_start = datetime(start.year - 1, 1, 1).date()
     alpaca_client = TradingClient(**alpaca_creds, paper=False)
     with open_session() as dbsession:
         existing_market_days = {
             d[0]
             for d in dbsession.query(MarketDays.date)
-            .filter(MarketDays.date.between(request_start.date(), end))
+            .filter(MarketDays.date.between(request_start, end))
             .all()
         }
-        calendar_request = GetCalendarRequest(start=request_start.date(), end=end)
+        calendar_request = GetCalendarRequest(start=request_start, end=end)
         market_days = {d.date for d in alpaca_client.get_calendar(calendar_request)}
         for day in market_days:
             if day not in existing_market_days:
@@ -341,8 +344,8 @@ if __name__ == "__main__":
             .all()
         )
         fill_dividend_data(dbsession, start, end, dividend_assets)
-    # fill_market_days(start, end)
-    # fill_holidays(start, end)
+    fill_market_days(start, end)
+    fill_holidays(start, end)
     # initial_fill_stocks(start, end)
     # with open_session() as dbsession:
     #     fill_dividend_data(dbsession, start, end)

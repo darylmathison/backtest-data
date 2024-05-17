@@ -1,10 +1,9 @@
-from sqlalchemy import asc
+from sqlalchemy import asc, and_
 
 import stock_data as sd
-from stock_data.models import Dividends, Stock, RiskReward
+from stock_data.models import Dividends, Stock, RiskReward, Assets
 import stock_data.fill_data as fd
 import pandas as pd
-import scipy.stats as stats
 import logging
 import datetime
 
@@ -13,13 +12,18 @@ import datetime
 
 
 def dividend_stocks(dbsession):
-    return {
+    return [
         symbol[0]
-        for symbol in dbsession.query(Stock.symbol)
-        .filter(Stock.dividend)
-        .distinct()
+        for symbol in dbsession.query(Assets.symbol)
+        .filter(
+            and_(
+                Assets.dividend,
+                Assets.percentage_downloaded > 0.8,
+                Assets.percentage_downloaded < 1.2,
+            )
+        )
         .all()
-    }
+    ]
 
 
 def get_stock(dbsession, symbol, date):
@@ -103,9 +107,14 @@ def process_all_securities(dbsession, symbols, buy_days=5):
     }
     symbols_to_research = set(symbols) - existing_evaluations
     for symbol in symbols_to_research:
-        _win_rate, loss_rate, avg_gain, avg_loss, sample_size, avg_dividend = win_rate(
-            dbsession, symbol, buy_days
-        )
+        (
+            _win_rate,
+            loss_rate,
+            avg_gain,
+            avg_loss,
+            percentage_downloaded,
+            avg_dividend,
+        ) = win_rate(dbsession, symbol, buy_days)
         if _win_rate is not None and (avg_loss > 0 and avg_gain > 0):
             portion_to_risk = (_win_rate / avg_loss) - (loss_rate / avg_gain)
             risk_reward_row = RiskReward(
@@ -114,7 +123,7 @@ def process_all_securities(dbsession, symbols, buy_days=5):
                 avg_gain=avg_gain,
                 loss_rate=loss_rate,
                 avg_loss=avg_loss,
-                sample_size=sample_size,
+                percentage_downloaded=percentage_downloaded,
                 avg_dividend=avg_dividend,
                 portion_to_risk=portion_to_risk,
                 last_update=datetime.datetime.now(),
@@ -122,7 +131,7 @@ def process_all_securities(dbsession, symbols, buy_days=5):
             dbsession.add(risk_reward_row)
             dbsession.commit()
     return pd.read_sql(
-        dbsession.query(RiskReward).statement, dbsession.bind, index_col="symbol"
+        dbsession.query(RiskReward).statement, dbsession.bind, index_col="id"
     )
 
 
@@ -168,12 +177,18 @@ def win_rate(dbsession, symbol, buy_days=5):
         )
     else:
         avg_loss = 0
+
+    percentage_downloaded = (
+        dbsession.query(Assets.percentage_downloaded)
+        .filter(Assets.symbol == symbol)
+        .first()[0]
+    )
     return (
         _win_rate,
         loss_rate,
         avg_gain,
         avg_loss,
-        len(divs),
+        percentage_downloaded,
         sd.convert_to_currency(divs["cash_amount"].mean()),
     )
 

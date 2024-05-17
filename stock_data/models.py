@@ -114,7 +114,7 @@ class RiskReward(Base):
     loss_rate: Mapped[float] = mapped_column(REAL)
     avg_gain: Mapped[float] = mapped_column(REAL)
     avg_loss: Mapped[float] = mapped_column(REAL)
-    sample_size: Mapped[int] = mapped_column(Integer)
+    percentage_downloaded: Mapped[float] = mapped_column(REAL)
     avg_dividend: Mapped[float] = mapped_column(REAL)
     last_update: Mapped[datetime.date] = mapped_column(Date)
     portion_to_risk: Mapped[float] = mapped_column(REAL, nullable=True)
