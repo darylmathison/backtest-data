@@ -242,7 +242,7 @@ def fill_dividend_data(dbsession, start, end, assets: list[Type[Assets]]):
         dbsession.commit()
 
 
-def find_start_date(asset: Assets, start: datetime.date):
+def get_ticker_start_date(asset: Assets, start: datetime.date):
     try:
         ticker_info = polygon_client.ticker_info(asset.symbol)
         date_key = "list_date"
@@ -257,8 +257,6 @@ def find_start_date(asset: Assets, start: datetime.date):
         yahoo_asset = yf.Ticker(asset.symbol).history(period="max")
         if not yahoo_asset.empty:
             return max(yahoo_asset.index[0].date(), start)
-    finally:
-        return start
 
 
 def fill_assets(dbsession, start: datetime.date):
@@ -274,7 +272,7 @@ def fill_assets(dbsession, start: datetime.date):
     assets_to_load = (asset for asset in assets if asset.symbol not in already_loaded)
     for asset in assets_to_load:
         logging.info("Adding %s", asset.symbol)
-        asset.start_date = find_start_date(asset, start)
+        asset.start_date = get_ticker_start_date(asset, start)
         dbsession.add(asset)
         dbsession.commit()
 

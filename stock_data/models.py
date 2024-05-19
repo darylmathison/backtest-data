@@ -34,7 +34,7 @@ class Stock(Base):
 class Dividends(Base):
     __tablename__ = "dividends"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    symbol: Mapped[str] = mapped_column(String)
+    symbol: Mapped[str] = mapped_column(String, ForeignKey("assets.symbol"))
     ex_dividend_date: Mapped[datetime.date] = mapped_column(Date)
     pay_date: Mapped[datetime.date] = mapped_column(Date)
     record_date: Mapped[datetime.date] = mapped_column(Date)
@@ -42,16 +42,11 @@ class Dividends(Base):
     cash_amount: Mapped[float] = mapped_column(REAL)
     currency: Mapped[str] = mapped_column(String)
     frequency: Mapped[str] = mapped_column(String)
+    dividend_type: Mapped[str] = mapped_column(String)
 
     symbol_index = Index("dividends_symbol", symbol)
     symbol_date_index = Index(
         "dividends_symbol_ex_dividend_date", symbol, ex_dividend_date
-    )
-
-    __table_args__ = (
-        UniqueConstraint(
-            "symbol", "ex_dividend_date", name="uix_symbol_ex_dividend_date"
-        ),
     )
 
 
@@ -81,6 +76,7 @@ class Assets(Base):
     dividend: Mapped[bool] = mapped_column(Boolean, default=False)
     dividend_checked: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    dividends = relationship("Dividends", backref="assets")
     market_days = relationship(
         "MarketDays", secondary=assets_marketdays_link, back_populates="assets"
     )

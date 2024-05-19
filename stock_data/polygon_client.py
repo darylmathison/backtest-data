@@ -10,7 +10,7 @@ api_key = os.environ.get("API_KEY")
 logging.basicConfig(level=logging.INFO)
 
 
-def get_dividend_announcements(symbol: str, the_day: datetime.datetime):
+def get_dividend_announcements(symbol: str, the_day: datetime.date):
     uri_template = "https://api.polygon.io/v3/reference/dividends?ticker={symbol}&ex_dividend_date.gte={date}&limit=1000&order=asc&sort=ex_dividend_date&apiKey={apikey}"
 
     repeat = True
