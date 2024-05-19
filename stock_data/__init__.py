@@ -17,3 +17,7 @@ def create_calendar():
             )
 
     return _calender
+
+
+def convert_to_currency(value: float) -> float:
+    return round(value + 0.0005, 2)
