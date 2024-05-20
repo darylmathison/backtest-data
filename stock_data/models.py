@@ -143,4 +143,5 @@ class RiskReward(Base):
     avg_dividend: Mapped[float] = mapped_column(REAL)
     last_update: Mapped[datetime.date] = mapped_column(Date)
     portion_to_risk: Mapped[float] = mapped_column(REAL, nullable=True)
-    __table_args__ = (UniqueConstraint("symbol", name="uix_risk_reward_symbol"),)
+
+    symbol_index = Index("risk_reward_symbol", symbol)

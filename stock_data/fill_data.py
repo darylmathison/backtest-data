@@ -182,6 +182,8 @@ def find_frequency(asset):
             ),
         )
     )
+    if len(frequency_counter) == 0:
+        return -1
     return float(frequency_counter.most_common(1)[0][0])
 
 

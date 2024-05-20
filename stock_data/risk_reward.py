@@ -148,6 +148,11 @@ def backtest_security(dbsession, start, end, asset, buy_days=5):
 
     num_of_months = fd.num_months_between_dates(asset.start_date, end)
     frequeny = fd.find_frequency(asset)
+    if frequeny == -1:
+        asset.dividend = False
+        dbsession.add(asset)
+        dbsession.commit()
+        return [None] * 6
     asset.min_num_events = fd.calulate_num_event(num_of_months, frequeny)
 
     div_data = [d for d in asset.dividends if d.ex_dividend_date < end]
