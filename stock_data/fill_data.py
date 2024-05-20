@@ -1,3 +1,4 @@
+import collections
 import logging
 import re
 from datetime import datetime
@@ -14,11 +15,20 @@ from alpaca.trading import TradingClient, GetAssetsRequest, GetCalendarRequest
 from dateutil.relativedelta import relativedelta
 from retry_reloaded import retry
 from sqlalchemy import create_engine, or_, and_, not_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from urllib3.exceptions import ReadTimeoutError
 
-from stock_data import polygon_client
-from stock_data.models import Stock, Base, Dividends, Holidays, MarketDays, Assets
+from stock_data import polygon_client, create_calendar
+from stock_data.models import (
+    Stock,
+    Base,
+    Dividends,
+    Holidays,
+    MarketDays,
+    Assets,
+    Event,
+)
 from stock_data.stock_downloads import download_stock_data
 import contextlib
 
@@ -108,12 +118,12 @@ def fill_stock_data(dbsession, symbol, start, end, timeframe=TimeFrame.Day):
         if stock_data:
             for stock in stock_data:
                 try:
-                    if not does_this_bar_exist(dbsession, stock.date, stock.symbol):
-                        dbsession.add(stock)
-                        dbsession.commit()
-                except UniqueViolation as uv:
-                    logging.warning("Duplicate entry: %s", uv)
-                mark_stock_as_downloaded(dbsession, stock.symbol, stock.date.date())
+                    dbsession.add(stock)
+                    dbsession.commit()
+                except IntegrityError as uv:
+                    dbsession.rollback()
+                    logging.debug("Duplicate entry: %s", uv)
+                # mark_stock_as_downloaded(dbsession, stock.symbol, stock.date.date())
 
     if isinstance(symbol, (list, tuple, set)):
         for s in symbol:
@@ -123,8 +133,11 @@ def fill_stock_data(dbsession, symbol, start, end, timeframe=TimeFrame.Day):
 
 
 def months_from_date_to_now(date):
-    now = datetime.now().date()
-    r = relativedelta(now, date)
+    return num_months_between_dates(date, datetime.now().date())
+
+
+def num_months_between_dates(start, end):
+    r = relativedelta(end, start)
     return r.years * 12 + r.months
 
 
@@ -134,19 +147,12 @@ def fill_dividend_data_with_existing_data(
     dividends = (
         dbsession.query(Dividends).filter(Dividends.symbol == asset.symbol).all()
     )
+    last_dividend = max(d.ex_dividend_date for d in dividends)
+    if last_dividend > end:
+        return None
+
     if len(dividends) > 0:
-        frequency_canidates = set(
-            map(
-                lambda x: float(x),
-                filter(
-                    lambda x: re.search(r"\d+", x), (d.frequency for d in dividends)
-                ),
-            )
-        )
-        if frequency_canidates:
-            frequency = max(frequency_canidates)
-        else:
-            frequency = -1
+        frequency = find_frequency(asset)
 
         asset.dividend = True
         number_of_months = months_from_date_to_now(asset.start_date)
@@ -166,14 +172,78 @@ def calulate_num_event(number_of_months, frequency):
     return int(number_of_months / (12.0 / frequency))
 
 
+def find_frequency(asset):
+    frequency_counter = collections.Counter(
+        map(
+            lambda x: x.frequency,
+            filter(
+                lambda x: x.frequency != "-1" and x.dividend_type == "CD",
+                asset.dividends,
+            ),
+        )
+    )
+    return float(frequency_counter.most_common(1)[0][0])
+
+
+def fill_event_data(dbsession, start, end, num_of_days, assets: list[Type[Assets]]):
+    """Dividend data is assumed to be current when this is run. Dividends are the basis of events"""
+    calendar = create_calendar()
+    for asset in assets:
+        events_end_dates = sorted(asset.events, key=lambda x: x.end_date)
+        sorted_dividends_dates = sorted(
+            asset.dividends, key=lambda x: x.ex_dividend_date
+        )
+        events_to_create = sorted_dividends_dates[len(events_end_dates) :]
+        for event in events_to_create:
+            sell_date = calendar.addbusdays(event.ex_dividend_date, -1)
+            buy_date = calendar.addbusdays(sell_date, -num_of_days)
+            event_to_add = Event(
+                symbol=asset.symbol,
+                end_date=sell_date,
+                start_date=buy_date,
+                num_days=num_of_days,
+            )
+            asset.events.append(event_to_add)
+        dbsession.add(asset)
+        dbsession.commit()
+
+        # now to fill the bars associated with the events
+        for event in asset.events:
+            if len(event.stock_bars) < event.num_days:
+                fill_stock_data(
+                    dbsession,
+                    asset.symbol,
+                    event.start_date,
+                    event.end_date,
+                    TimeFrame.Day,
+                )
+                new_bars = (
+                    dbsession.query(Stock)
+                    .filter(
+                        Stock.symbol == asset.symbol,
+                        Stock.date.between(event.start_date, event.end_date),
+                    )
+                    .all()
+                )
+                event.stock_bars.extend(new_bars)
+                dbsession.add(event)
+                dbsession.commit()
+
+
 @retry((ReadTimeoutError,))
 def fill_dividend_data(dbsession, start, end, assets: list[Type[Assets]]):
     for asset in assets:
+        last_dividend = max(d.ex_dividend_date for d in asset.dividends)
+
         logging.info("Downloading %s", asset.symbol)
         if fill_dividend_data_with_existing_data(dbsession, asset, start, end):
             dbsession.commit()
             continue
         asset_dividend_init = False
+        last_dividend = max(d.ex_dividend_date for d in asset.dividends)
+        if start < last_dividend < end:
+            # yes this breaks a rule or two
+            start = last_dividend
         for announcement in get_dividend_announcements(asset.symbol, start):
             if not asset.dividend and not asset_dividend_init:
                 if (
@@ -222,7 +292,8 @@ def fill_dividend_data(dbsession, start, end, assets: list[Type[Assets]]):
                         currency=announcement["currency"],
                         frequency=announcement["frequency"] or "unknown",
                     )
-                    dbsession.add(dividend)
+                    asset.dividends.append(dividend)
+                    dbsession.add(asset)
                     dbsession.commit()
 
             except UniqueViolation as e:

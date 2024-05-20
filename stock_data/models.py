@@ -12,6 +12,15 @@ class Base(DeclarativeBase):
     pass
 
 
+# Define the association table
+event_stocks_association = Table(
+    "event_stocks",
+    Base.metadata,
+    Column("event_id", Integer, ForeignKey("event.id")),
+    Column("stock_id", Integer, ForeignKey("stocks.id")),
+)
+
+
 class Stock(Base):
     __tablename__ = "stocks"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -24,6 +33,9 @@ class Stock(Base):
     date: Mapped[datetime.date] = mapped_column(Date)
     trade_count: Mapped[float] = mapped_column(REAL)
     dividend: Mapped[bool] = mapped_column(Boolean)
+    events = relationship(
+        "Event", secondary=event_stocks_association, back_populates="stock_bars"
+    )
 
     symbol_index = Index("stock_symbol_index", symbol)
     symbol_date_index = Index("stock_symbol_date_index", symbol, date)
@@ -80,8 +92,25 @@ class Assets(Base):
     market_days = relationship(
         "MarketDays", secondary=assets_marketdays_link, back_populates="assets"
     )
+    events = relationship("Event", back_populates="asset")
 
     __table_args__ = (UniqueConstraint("symbol", name="uix_assets_symbol"),)
+
+
+class Event(Base):
+    __tablename__ = "event"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    asset_id: Mapped[int] = mapped_column(Integer, ForeignKey("assets.id"))
+    symbol: Mapped[str] = mapped_column(String)
+    start_date: Mapped[datetime.date] = mapped_column(Date)
+    end_date: Mapped[datetime.date] = mapped_column(Date)
+    num_days: Mapped[int] = mapped_column(Integer)
+
+    asset = relationship("Assets", back_populates="events")
+    stock_bars = relationship(
+        "Stock", secondary=event_stocks_association, back_populates="events"
+    )
 
 
 class MarketDays(Base):

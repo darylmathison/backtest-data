@@ -1,7 +1,17 @@
-from sqlalchemy import asc, and_
+from typing import Type, List, Any
+
+from sqlalchemy import asc, and_, func
 
 import stock_data as sd
-from stock_data.models import Dividends, Stock, RiskReward, Assets
+from stock_data.models import (
+    Dividends,
+    Stock,
+    RiskReward,
+    Assets,
+    Holidays,
+    MarketDays,
+    Event,
+)
 import stock_data.fill_data as fd
 import pandas as pd
 import logging
@@ -11,10 +21,10 @@ import datetime
 # what to risk = prob of win/amount of loss - prob of loss/amount of gain
 
 
-def dividend_stocks(dbsession):
+def dividend_stocks(dbsession) -> list[Any]:
     return [
-        symbol[0]
-        for symbol in dbsession.query(Assets.symbol)
+        asset
+        for asset in dbsession.query(Assets)
         .filter(
             and_(
                 Assets.dividend,
@@ -59,54 +69,53 @@ def sell_price(dbsession, symbol, date):
     return stock.close
 
 
-def simulate_trade(row, symbol, dbsession, num_days):
+def simulate_trade(row, dbsession, div_multiplier=1):
     event_days = (
         dbsession.query(Stock)
         .filter(
-            Stock.symbol == symbol,
-            Stock.date.between(row["purchase_date"], row["sell_date"]),
+            and_(
+                Stock.symbol == row["symbol"],
+                Stock.date >= row["start_date"],
+                Stock.date <= row["end_date"],
+            )
         )
         .order_by(asc(Stock.date))
         .all()
     )
-    if len(event_days) < num_days:
-        fd.fill_stock_data(dbsession, symbol, row["purchase_date"], row["sell_date"])
-        event_days = (
-            dbsession.query(Stock)
-            .filter(
-                Stock.symbol == symbol,
-                Stock.date.between(row["purchase_date"], row["sell_date"]),
-            )
-            .order_by(asc(Stock.date))
-            .all()
-        )
-    if len(event_days) < num_days:
-        return None
+    if len(event_days) == 0:
+        return 0
     beginning_price = event_days[0].open
     end_price = event_days[-1].close
     if beginning_price is None or end_price is None:
         return None
 
-    profit_price = sd.convert_to_currency(row["cash_amount"] + beginning_price)
+    profit_price = sd.convert_to_currency(
+        div_multiplier * row["cash_amount"] + beginning_price
+    )
     stop_loss = sd.convert_to_currency(beginning_price * 0.90)
-    highest_price = max([event.high for event in event_days])
-    lowest_price = min([event.low for event in event_days])
 
-    if highest_price >= profit_price:
-        return profit_price - beginning_price
-    elif lowest_price <= stop_loss:
-        return stop_loss - beginning_price
+    for event in event_days:
+        if event.high >= profit_price:
+            return profit_price - beginning_price
+        elif event.low <= stop_loss:
+            return stop_loss - beginning_price
 
     return end_price - beginning_price + row["cash_amount"]
 
 
-def process_all_securities(dbsession, symbols, buy_days=5):
-    rows = []
+def process_all_securities(dbsession, assets, buy_days=5):
+    end = datetime.date.today()
+    start = datetime.date(end.year - 10, end.month, end.day)
+
+    fd.fill_market_days(start, end)
+    fd.fill_holidays(start, end)
+
     existing_evaluations = {
         symbol[0] for symbol in dbsession.query(RiskReward.symbol).all()
     }
-    symbols_to_research = set(symbols) - existing_evaluations
-    for symbol in symbols_to_research:
+    symbols_to_research = set((a.symbol for a in assets)) - existing_evaluations
+    assets_to_research = [a for a in assets if a.symbol in symbols_to_research]
+    for asset in assets_to_research:
         (
             _win_rate,
             loss_rate,
@@ -114,11 +123,11 @@ def process_all_securities(dbsession, symbols, buy_days=5):
             avg_loss,
             percentage_downloaded,
             avg_dividend,
-        ) = win_rate(dbsession, symbol, buy_days)
+        ) = backtest_security(dbsession, start, end, asset, buy_days)
         if _win_rate is not None and (avg_loss > 0 and avg_gain > 0):
             portion_to_risk = (_win_rate / avg_loss) - (loss_rate / avg_gain)
             risk_reward_row = RiskReward(
-                symbol=symbol,
+                symbol=asset.symbol,
                 win_rate=_win_rate,
                 avg_gain=avg_gain,
                 loss_rate=loss_rate,
@@ -135,26 +144,38 @@ def process_all_securities(dbsession, symbols, buy_days=5):
     )
 
 
-def win_rate(dbsession, symbol, buy_days=5):
-    divs = pd.read_sql(
+def backtest_security(dbsession, start, end, asset, buy_days=5):
+
+    num_of_months = fd.num_months_between_dates(asset.start_date, end)
+    frequeny = fd.find_frequency(asset)
+    asset.min_num_events = fd.calulate_num_event(num_of_months, frequeny)
+
+    div_data = [d for d in asset.dividends if d.ex_dividend_date < end]
+    if len(div_data) < asset.min_num_events:
+        fd.fill_dividend_data(dbsession, start, end, [asset])
+    if len(asset.events) < len(asset.dividends):
+        fd.fill_event_data(dbsession, start, end, buy_days, [asset])
+    query = (
         dbsession.query(
-            Dividends.symbol, Dividends.ex_dividend_date, Dividends.cash_amount
+            Assets.symbol, Dividends.cash_amount, Event.start_date, Event.end_date
         )
-        .filter(Dividends.symbol == symbol)
-        .statement,
+        .join(Dividends)
+        .join(Event)
+        .filter(Assets.symbol == asset.symbol)
+    )
+    divs = pd.read_sql(
+        query.statement,
         dbsession.bind,
-        index_col="ex_dividend_date",
     )
     if len(divs) < 2:
         return [None] * 6
+
     calendar = sd.create_calendar()
-    divs["sell_date"] = divs.index.map(lambda x: calendar.addbusdays(x, -1))
-    divs["purchase_date"] = divs.index.map(lambda x: calendar.addbusdays(x, -buy_days))
-    divs["gain"] = divs[["sell_date", "purchase_date", "cash_amount"]].apply(
-        simulate_trade, args=(symbol, dbsession, buy_days), axis=1
+    divs["gain"] = divs[["symbol", "start_date", "end_date", "cash_amount"]].apply(
+        simulate_trade, args=(dbsession, 1.0), axis=1
     )
-    divs["purchase_price"] = divs["purchase_date"].map(
-        lambda x: purchase_price(dbsession, symbol, x)
+    divs["purchase_price"] = divs["start_date"].map(
+        lambda x: purchase_price(dbsession, asset.symbol, x)
     )
     divs["percent_gain"] = divs["gain"] / divs["purchase_price"]
     divs["win"] = divs["gain"] > 0
@@ -180,7 +201,7 @@ def win_rate(dbsession, symbol, buy_days=5):
 
     percentage_downloaded = (
         dbsession.query(Assets.percentage_downloaded)
-        .filter(Assets.symbol == symbol)
+        .filter(Assets.symbol == asset.symbol)
         .first()[0]
     )
     return (
@@ -195,27 +216,4 @@ def win_rate(dbsession, symbol, buy_days=5):
 
 if __name__ == "__main__":
     with fd.open_session() as session:
-        print(win_rate(session, "CCEP", 5))
-        # symbols = dividend_stocks(session)
-        # df = process_all_securities(session, symbols, 5)
-        # df["risk"] = (df["win_rate"] / df["avg_loss"]) - (
-        #     df["loss_rate"] / df["avg_gain"]
-        # )
-        # print(df[df["symbol"] == "MO"])
-        # print(
-        #     df[
-        #         [
-        #             "symbol",
-        #             "win_rate",
-        #             "avg_gain",
-        #             "loss_rate",
-        #             "avg_loss",
-        #             "risk",
-        #             "sample_size",
-        #         ]
-        #     ]
-        #     .where(df["sample_size"] > 20)
-        #     .dropna()
-        #     .sort_values("risk", ascending=False)
-        #     .head(10)
-        # )
+        process_all_securities(session, dividend_stocks(session))
