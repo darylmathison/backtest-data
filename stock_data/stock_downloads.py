@@ -5,6 +5,7 @@ import yfinance
 from alpaca.data import StockHistoricalDataClient, TimeFrame, StockBarsRequest
 from retry_reloaded import retry
 from urllib3.exceptions import ReadTimeoutError
+from requests.exceptions import ReadTimeout
 
 from stock_data.models import Stock
 import stock_data as sd
@@ -15,7 +16,7 @@ alpaca_creds = {
 }
 
 
-@retry((ReadTimeoutError,))
+@retry((ReadTimeout,))
 def pull_from_alpaca(
     symbol: str, start: datetime.date, end: datetime.date, timeframe: TimeFrame
 ) -> list[Stock]:
