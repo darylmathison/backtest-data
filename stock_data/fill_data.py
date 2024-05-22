@@ -1,6 +1,5 @@
 import collections
 import logging
-import re
 from datetime import datetime
 import os
 from typing import Type
@@ -34,7 +33,6 @@ import contextlib
 
 from stock_data.polygon_client import get_dividend_announcements
 
-from psycopg2.errors import UniqueViolation
 
 alpaca_creds = {
     "api_key": os.getenv("ALPACA_API_KEY"),
