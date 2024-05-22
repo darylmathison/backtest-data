@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import String, REAL, Date, Boolean, UniqueConstraint, Index
+from sqlalchemy import String, REAL, Date, Boolean, UniqueConstraint, Index, DateTime
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
@@ -141,7 +141,9 @@ class RiskReward(Base):
     avg_loss: Mapped[float] = mapped_column(REAL)
     percentage_downloaded: Mapped[float] = mapped_column(REAL)
     avg_dividend: Mapped[float] = mapped_column(REAL)
-    last_update: Mapped[datetime.date] = mapped_column(Date)
+    last_update: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
+    div_multiplier: Mapped[float] = mapped_column(REAL, nullable=True)
+    stop_loss_percentage: Mapped[float] = mapped_column(REAL, nullable=True)
     portion_to_risk: Mapped[float] = mapped_column(REAL, nullable=True)
 
     symbol_index = Index("risk_reward_symbol", symbol)

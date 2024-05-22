@@ -1,6 +1,6 @@
 from typing import Type, List, Any
 
-from sqlalchemy import asc, and_, func
+from sqlalchemy import asc, and_
 
 import stock_data as sd
 from stock_data.models import (
@@ -8,8 +8,6 @@ from stock_data.models import (
     Stock,
     RiskReward,
     Assets,
-    Holidays,
-    MarketDays,
     Event,
 )
 import stock_data.fill_data as fd
@@ -69,7 +67,7 @@ def sell_price(dbsession, symbol, date):
     return stock.close
 
 
-def simulate_trade(row, dbsession, div_multiplier=1):
+def simulate_trade(row, dbsession, div_multiplier=1, stop_loss_percentage=0.9):
     event_days = (
         dbsession.query(Stock)
         .filter(
@@ -92,7 +90,7 @@ def simulate_trade(row, dbsession, div_multiplier=1):
     profit_price = sd.convert_to_currency(
         div_multiplier * row["cash_amount"] + beginning_price
     )
-    stop_loss = sd.convert_to_currency(beginning_price * 0.90)
+    stop_loss = sd.convert_to_currency(beginning_price * (1 - stop_loss_percentage))
 
     for event in event_days:
         if event.high >= profit_price:
@@ -123,6 +121,8 @@ def process_all_securities(dbsession, assets, buy_days=5):
             avg_loss,
             percentage_downloaded,
             avg_dividend,
+            div_multiplier,
+            stop_loss_percentage,
         ) = backtest_security(dbsession, start, end, asset, buy_days)
         if _win_rate is not None and (avg_loss > 0 and avg_gain > 0):
             portion_to_risk = (_win_rate / avg_loss) - (loss_rate / avg_gain)
@@ -136,6 +136,8 @@ def process_all_securities(dbsession, assets, buy_days=5):
                 avg_dividend=avg_dividend,
                 portion_to_risk=portion_to_risk,
                 last_update=datetime.datetime.now(),
+                div_multiplier=div_multiplier,
+                stop_loss_percentage=stop_loss_percentage,
             )
             dbsession.add(risk_reward_row)
             dbsession.commit()
@@ -144,15 +146,17 @@ def process_all_securities(dbsession, assets, buy_days=5):
     )
 
 
-def backtest_security(dbsession, start, end, asset, buy_days=5):
-
+def backtest_security(
+    dbsession, start, end, asset, buy_days=5, div_multiplier=1, stop_loss_percentage=0.9
+):
+    null_return = [None] * 8
     num_of_months = fd.num_months_between_dates(asset.start_date, end)
     frequeny = fd.find_frequency(asset)
     if frequeny == -1:
         asset.dividend = False
         dbsession.add(asset)
         dbsession.commit()
-        return [None] * 6
+        return null_return
     asset.min_num_events = fd.calulate_num_event(num_of_months, frequeny)
 
     div_data = [d for d in asset.dividends if d.ex_dividend_date < end]
@@ -173,11 +177,11 @@ def backtest_security(dbsession, start, end, asset, buy_days=5):
         dbsession.bind,
     )
     if len(divs) < 2:
-        return [None] * 6
+        return null_return
 
     calendar = sd.create_calendar()
     divs["gain"] = divs[["symbol", "start_date", "end_date", "cash_amount"]].apply(
-        simulate_trade, args=(dbsession, 1.0), axis=1
+        simulate_trade, args=(dbsession, div_multiplier, stop_loss_percentage), axis=1
     )
     divs["purchase_price"] = divs["start_date"].map(
         lambda x: purchase_price(dbsession, asset.symbol, x)
@@ -216,6 +220,8 @@ def backtest_security(dbsession, start, end, asset, buy_days=5):
         avg_loss,
         percentage_downloaded,
         sd.convert_to_currency(divs["cash_amount"].mean()),
+        div_multiplier,
+        stop_loss_percentage,
     )
 
 
