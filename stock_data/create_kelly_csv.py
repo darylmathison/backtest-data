@@ -22,6 +22,8 @@ def get_best_risk_reward(dbsession):
                             model.Assets.dividend,
                             model.Assets.percentage_downloaded > 0.8,
                             model.Assets.percentage_downloaded < 1.2,
+                            model.Assets.beta > 0.95,
+                            model.Assets.beta < 3,
                         )
                     )
                 ),

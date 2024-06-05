@@ -87,6 +87,8 @@ class Assets(Base):
     percentage_downloaded: Mapped[float] = mapped_column(REAL, default=0.0)
     dividend: Mapped[bool] = mapped_column(Boolean, default=False)
     dividend_checked: Mapped[bool] = mapped_column(Boolean, default=False)
+    avg_volume: Mapped[float] = mapped_column(REAL, default=0.0)
+    beta: Mapped[float] = mapped_column(REAL, default=0.0)
 
     dividends = relationship("Dividends", backref="assets")
     market_days = relationship(

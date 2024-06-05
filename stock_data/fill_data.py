@@ -399,22 +399,44 @@ def fill_market_days(start, end):
         dbsession.commit()
 
 
+def fill_avg_volume_and_beta():
+    with open_session() as session:
+        assets = session.query(Assets).filter(Assets.dividend).all()
+        for asset in assets:
+            try:
+                stock = yf.Ticker(asset.symbol)
+                info = stock.info
+                if "averageVolume" in info:
+                    asset.avg_volume = info["averageVolume"]
+                else:
+                    history = stock.history(period="2y")
+                    asset.avg_volume = history["Volume"].mean()
+                asset.beta = info.get("beta3Year", info.get("beta", 0.0))
+                session.add(asset)
+                session.commit()
+            except Exception as e:
+                logging.error(
+                    "Error finding beta and avg volume for %s: %s", asset.symbol, e
+                )
+
+
 if __name__ == "__main__":
-    end = datetime.now()
-    end = datetime(end.year, end.month, end.day).date()
-    years_back = 10
-    start = datetime(end.year - years_back, 1, 1).date()
-    with open_session() as dbsession:
-        fill_assets(dbsession, start)
-        dividend_assets = (
-            dbsession.query(Assets)
-            .filter(not_(Assets.dividend_checked))
-            .order_by(Assets.symbol)
-            .all()
-        )
-        fill_dividend_data(dbsession, start, end, dividend_assets)
-    fill_market_days(start, end)
-    fill_holidays(start, end)
+    fill_avg_volume_and_beta()
+    # end = datetime.now()
+    # end = datetime(end.year, end.month, end.day).date()
+    # years_back = 10
+    # start = datetime(end.year - years_back, 1, 1).date()
+    # with open_session() as dbsession:
+    #     fill_assets(dbsession, start)
+    #     dividend_assets = (
+    #         dbsession.query(Assets)
+    #         .filter(not_(Assets.dividend_checked))
+    #         .order_by(Assets.symbol)
+    #         .all()
+    #     )
+    #     fill_dividend_data(dbsession, start, end, dividend_assets)
+    # fill_market_days(start, end)
+    # fill_holidays(start, end)
     # initial_fill_stocks(start, end)
     # with open_session() as dbsession:
     #     fill_dividend_data(dbsession, start, end)
