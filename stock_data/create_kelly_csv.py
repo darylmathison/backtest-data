@@ -4,7 +4,7 @@ import csv
 from sqlalchemy import select, func, and_, table
 
 
-def get_best_risk_reward(dbsession):
+def get_best_risk_reward():
     # Subquery for the inner join
     subquery = (
         select(
@@ -55,8 +55,8 @@ def get_best_risk_reward(dbsession):
         )
     )
 
-    # Execute the query
-    return dbsession.execute(query).all()
+    with fd.open_session as dbsession:
+        return dbsession.execute(query).all()
 
 
 def main():
@@ -68,23 +68,22 @@ def main():
             return True
         return False
 
-    with fd.open_session() as session:
-        results = get_best_risk_reward(session)
-        reduced_results = [row for row in results if result_filter(row)]
-        print(len(reduced_results))
-        with open("best_risk_reward.csv", "w") as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                [
-                    "priority",
-                    "symbol",
-                    "portion_to_risk",
-                    "div_multiplier",
-                    "stop_loss_percentage",
-                ]
-            )
-            for i, row in enumerate(reduced_results):
-                writer.writerow((i, row[0], round(row[1], 3), row[2], row[3]))
+    results = get_best_risk_reward()
+    reduced_results = [row for row in results if result_filter(row)]
+    print(len(reduced_results))
+    with open("best_risk_reward.csv", "w") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            [
+                "priority",
+                "symbol",
+                "portion_to_risk",
+                "div_multiplier",
+                "stop_loss_percentage",
+            ]
+        )
+        for i, row in enumerate(reduced_results):
+            writer.writerow((i, row[0], round(row[1], 3), row[2], row[3]))
 
 
 if __name__ == "__main__":
