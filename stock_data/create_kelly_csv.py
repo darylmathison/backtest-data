@@ -5,7 +5,6 @@ from sqlalchemy import select, func, and_, table
 
 
 def get_best_risk_reward(dbsession):
-
     # Subquery for the inner join
     subquery = (
         select(
@@ -34,7 +33,6 @@ def get_best_risk_reward(dbsession):
         .subquery(name="a")
     )
 
-    risk_reward = table("risk_reward")
     # Main query
     query = (
         select(
@@ -62,19 +60,18 @@ def get_best_risk_reward(dbsession):
 
 
 def main():
+    symbol_to_filter = set()
+
+    def result_filter(row):
+        if row[0] not in symbol_to_filter:
+            symbol_to_filter.add(row[0])
+            return True
+        return False
+
     with fd.open_session() as session:
         results = get_best_risk_reward(session)
-        reduced_results = []
-        symbol_to_filter = None
-        print(len(results))
-        for row in results:
-            if symbol_to_filter is None:
-                symbol_to_filter = row[0]
-                reduced_results.append(row)
-            elif symbol_to_filter != row[0]:
-                symbol_to_filter = row[0]
-                reduced_results.append(row)
-
+        reduced_results = [row for row in results if result_filter(row)]
+        print(len(reduced_results))
         with open("best_risk_reward.csv", "w") as f:
             writer = csv.writer(f)
             writer.writerow(
