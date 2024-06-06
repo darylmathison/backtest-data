@@ -55,7 +55,7 @@ def get_best_risk_reward():
         )
     )
 
-    with fd.open_session as dbsession:
+    with fd.open_session() as dbsession:
         return dbsession.execute(query).all()
 
 
