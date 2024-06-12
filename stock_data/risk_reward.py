@@ -147,7 +147,7 @@ def process_all_securities(dbsession, assets, buy_days=5):
 
 
 def backtest_security(
-    dbsession, start, end, asset, buy_days=5, div_multiplier=1, stop_loss_percentage=0.9
+    dbsession, start, end, asset, buy_days=5, div_multiplier=1, stop_loss_percentage=0.1
 ):
     null_return = [None] * 8
     num_of_months = fd.num_months_between_dates(asset.start_date, end)
