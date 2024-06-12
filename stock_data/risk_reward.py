@@ -219,7 +219,7 @@ def backtest_security(
         avg_gain,
         avg_loss,
         percentage_downloaded,
-        sd.convert_to_currency(divs["cash_amount"].mean()),
+        sd.convert_to_currency(divs["cash_amount"].mode()),
         div_multiplier,
         stop_loss_percentage,
     )
