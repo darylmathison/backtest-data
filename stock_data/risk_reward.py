@@ -67,7 +67,7 @@ def sell_price(dbsession, symbol, date):
     return stock.close
 
 
-def simulate_trade(row, dbsession, div_multiplier=1, stop_loss_percentage=0.9):
+def simulate_trade(row, dbsession, div_multiplier=1, stop_loss_percentage=0.1):
     event_days = (
         dbsession.query(Stock)
         .filter(
