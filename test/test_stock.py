@@ -37,7 +37,8 @@ raw_dividend_data = """
     "ex_dividend_date": "2024-04-26",
     "record_date": "2024-04-29",
     "pay_date": "2024-06-11",
-    "cash_amount": 0.958352
+    "cash_amount": 0.958352,
+    "frequency": "4"
   },
   {
     "symbol": "ASML",
@@ -128,8 +129,9 @@ class TestDividends(unittest.TestCase):
                 "pay_date": convert_to_date(row["pay_date"]),
                 "cash_amount": row["cash_amount"],
                 "currency": "USD",
-                "frequency": "CD",
+                "frequency": "4",
                 "declared_date": convert_to_date(row["ex_dividend_date"]),
+                "dividend_type": "CD",
             }
             dividend = stock_data.models.Dividends(**dividend_data_row)
             self.session.add(dividend)
