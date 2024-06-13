@@ -296,7 +296,7 @@ def fill_dividend_data(dbsession, start, end, assets: list[Type[Assets]]):
                     dbsession.add(asset)
                     dbsession.commit()
 
-            except UniqueViolation as e:
+            except IntegrityError as e:
                 logging.warning("Duplicate entry: %s", e)
         if asset.dividend:
             asset_announcements = (
