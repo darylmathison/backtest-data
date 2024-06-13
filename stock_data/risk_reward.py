@@ -1,8 +1,12 @@
-from typing import Type, List, Any
+import datetime
+import logging
+from typing import Any
 
+import pandas as pd
 from sqlalchemy import asc, and_
 
 import stock_data as sd
+import stock_data.fill_data as fd
 from stock_data.models import (
     Dividends,
     Stock,
@@ -10,10 +14,6 @@ from stock_data.models import (
     Assets,
     Event,
 )
-import stock_data.fill_data as fd
-import pandas as pd
-import logging
-import datetime
 
 
 # what to risk = prob of win/amount of loss - prob of loss/amount of gain
